@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Circular Hierarchy</title>
+<!-- Author: Bo Ericsson, bo@boe.net -->
+<style>
+body {
+  margin: 0px;
+  font-family: "Helvetica Neue";
+}
+circle {
+  stroke: gray;
+  stroke-width: 2;
+}
+path {
+  fill: none;
+  stroke: gray;
+  stroke-width: 1px;
+}
+#outer {
+  min-width: 960px;
+  min-height: 600px;
+  max-width: 960px;
+  max-height: 600px;
+  text-align: center;
+}
+#container {
+  display: inline-block;
+  margin-right: 40px;
+  min-width: 540px;
+  min-height: 540px;
+}
+#control {
+  display: inline-block;
+  vertical-align: top;
+  background-color: white;
+  text-align: left;
+}
+label {
+  display: block;
+}
+h2 {
+  margin: 8px;
+}
+textarea {
+  font-size: 12px;
+  resize: none;
+  margin-top: 20px;
+}
+span {
+  font-size: 12px;
+}
+button {
+  width: 90px;
+  font-size: 13px;
+  margin-top: 10px
+}
+</style>
+
+<body>
+  <div id="outer">
+    <h2>Circular Hierarchy With Random Depth and Width</h2>
+    <div id="container"></div>
+    <div id="control">
+      <div id="ui">
+        <input id="showNodes" type="checkbox" name="options" value="Nodes" checked /><span>Nodes</span> <br />
+        <input id="showEdges" type="checkbox" name="options" value="Edges" checked /><span>Edges</span> <br />
+        <button>Reload</button>
+      </div>
+      <textarea cols=40 rows=28></textarea>
+    </div>
+  </div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.6/d3.min.js"></script>
+<script>
+'use strict';
+var showNodes = true;
+var showEdges = true;
+
+// handle reload button
+d3.select("button").on("click", function() {
+  showNodes = d3.select("#showNodes").property("checked");
+  showEdges = d3.select("#showEdges").property("checked");
+  go();
+})
+
+// Generate viz
+function go() {
+
+  var textArea = d3.select("textArea");
+  var svgDim = { width: 540, height: 540 };
+  var offset = 20;
+  var options = {
+    width: 500,
+    height: 500,
+    radius: 12
+  }
+  var leafRadius = options.radius;
+  var colorScale =  d3.scale.category20();
+  var fmt = d3.format(".2f");
+
+  // Generate a random hierarchy
+  var stats = generateRandomHierarchy();
+  var data = stats.data;
+  var meta = stats.meta;
+
+  // Count leaves and depth
+  var levels = {}
+  function walk1(child, level) {
+
+    // create level propery in levels if not yet exist
+    if (!(level in levels)) { levels[level] = { count: 0 }; };
+
+    levels[level].count++;
+
+    var leafCount = 0;
+
+    if (child.children) {
+      child.children.forEach(function(d, i) {
+        // Get leaf count from children
+        leafCount += walk1(d, level + 1)
+      })
+    }
+
+    // Sum the leaf count
+    child.leafCount = leafCount;
+
+    // Return the leaf count
+    return !child.children ? 1 : leafCount;
+
+  };
+  walk1(data, 0);
+
+  // Determine depth and radius from center of each level
+  var depth = Object.keys(levels).length;
+  Object.keys(levels).forEach(function(d, i) {
+    levels[d].radius = options.width / (depth - 1) * i / 2;
+  });
+
+  // Determine leaf angle and set start angle
+  var totalLeafCount = data.leafCount;
+  if (totalLeafCount > 30) {
+    var circum = options.width * Math.PI;
+    leafRadius = Math.min(options.radius, circum / totalLeafCount / 2 * 0.7);
+  }
+
+  var radiusScale = d3.scale.linear()
+      .domain([0, depth])
+      .range([options.radius, leafRadius]);
+
+  var leafAngle = 360 / totalLeafCount;
+  data.startAngle = 0;
+  data.color = "yellow";
+  var currAngle = 0;
+
+  // Set node angles
+  function walk2(child, level) {
+    // Set radius from center
+    child.radius = levels[level].radius;
+
+    if (child.children) {
+      // Parent node
+
+      // Determine parent's position (centered between its children)
+      child.nodeAngle = currAngle + ((child.leafCount - 1) * leafAngle / 2); // center
+
+      // Visit each child
+      child.children.forEach(function(d, i) {
+        if (child.color == "yellow") {
+          d.color = colorScale(i)
+        }
+        else {
+          d.color = child.color;
+        }
+
+        // Set start angle for this node
+        d.startAngle = currAngle;
+
+        // Recurse down
+        walk2(d, level + 1)
+      })
+    }
+    else {
+      // Leaf node
+
+      // Update current angle
+      currAngle += leafAngle;
+    }
+  }
+  walk2(data, 0);
+
+  // Determine positions
+  function walk3(child) {
+    var angle = child.nodeAngle || child.startAngle; // leaf will not have the nodeAngle prop
+
+    // Compute circle radius
+    child.r = radiusScale(child.level != undefined ? child.level : depth)
+
+    // Compute positions (child.radius is distance from center)
+    var ctrlPointDist = 35;
+    child.cx =          Math.sin(angle / 180 * Math.PI) * child.radius;
+    child.cy =          Math.cos(angle / 180 * Math.PI) * child.radius;
+
+    child.innerCtrlCx = Math.sin(angle / 180 * Math.PI) * (child.radius - ctrlPointDist - child.r);
+    child.innerCtrlCy = Math.cos(angle / 180 * Math.PI) * (child.radius - ctrlPointDist - child.r);
+
+    child.outerCtrlCx = Math.sin(angle / 180 * Math.PI) * (child.radius + ctrlPointDist + child.r);
+    child.outerCtrlCy = Math.cos(angle / 180 * Math.PI) * (child.radius + ctrlPointDist + child.r);
+
+    // Visit all nodes
+    if (child.children) {
+      child.children.forEach(function(d) {
+        d.parentCx = child.cx;
+        d.parentCy = child.cy;
+
+        d.parentOuterCx = child.level == 0 ? 0 : child.outerCtrlCx;
+        d.parentOuterCy = child.level == 0 ? 0 : child.outerCtrlCy;
+
+        walk3(d);
+      })
+    }
+  };
+  walk3(data);
+
+  // Formatter for JSON stringifier
+  var formatter = function formatter(key, value) {
+    return Number.isFinite(value) ? fmt(value) : value;
+  }
+
+  // Create text for the textarea
+  var text = [
+    "Hierarchy depth: " + meta.usedDepth,
+    "Max width: " + meta.maxWidth,
+    "\nNode count of each level:",
+    JSON.stringify(levels, formatter, 2),
+    "\nRaw data:",
+    JSON.stringify(data, formatter, 2)
+  ].join("\n");
+
+  // Set the text
+  textArea.text(text);
+
+  // Clear the svg container
+  var container = d3.select("#container")
+  container.selectAll("*").remove();
+
+  // Create the svg
+  var svg = container.append("svg")
+      .attr("width", svgDim.width)
+      .attr("height", svgDim.height)
+    .append("g")
+      //.attr("transform", "translate(" + ((svgDim.width - options.width) / 2) + ", " + ((svgDim.width - options.width) / 2) + ")");
+      .attr("transform", "translate(" + offset + ", " + offset + ")");
+
+  var viz = svg.append("g")
+      .attr("transform", "translate(" + (options.width / 2) + ", " + (options.width / 2) + ")");
+
+  // Draw the edges (connecting lines) with cubic bezier curves
+  function drawLines(child) {
+
+    // <path d="M10 10 C 20 20, 40 20, 50 10" stroke="black" fill="transparent"/>
+    viz.append("path")
+        .attr("d", function() {
+          if (child.level == 0) return;
+
+          var path = "M" + child.cx +       " " + child.cy +
+              " C " + child.innerCtrlCx +   " " + child.innerCtrlCy +
+              " "   + child.parentOuterCx + " " + child.parentOuterCy +
+              " "   + child.parentCx +      " " + child.parentCy;
+
+          return path;
+        })
+
+    // Visit and draw all nodes
+    if (child.children) {
+      child.children.forEach(function(d) {
+        drawLines(d);
+      })
+    }
+  };
+  if (showEdges) {
+    drawLines(data);
+  }
+
+  // Draw the nodes
+  function drawCircles(child) {
+
+    viz.append("circle")
+      .attr("cx", child.cx)
+      .attr("cy", child.cy)
+      .attr("r", function() {
+        return radiusScale(child.level != undefined ? child.level : depth)
+      })
+      .attr("fill", child.color)
+
+    // Visit and draw all nodes
+    if (child.children) {
+      child.children.forEach(function(d) {
+        drawCircles(d);
+      })
+    }
+  };
+  if (showNodes) {
+    drawCircles(data);
+  }
+
+  // Generate a random hierarchy
+  function generateRandomHierarchy() {
+    var maxDepth = 7;
+    var minDepth = 3;
+    var usedDepth = ~~((Math.random() * (maxDepth - minDepth)) + minDepth);
+    var currDepth = 0;
+    var maxWidth = 5;
+    var seq = 0
+    var data = { id: "0", seq: seq++ };
+    var maxItems = 0;
+
+    function addChildren(o, l) {
+      if (l >= usedDepth) return;
+      o.level = l;
+      o.leaf = false;
+      var items = Math.max(2, ~~(Math.random() * maxWidth));
+      maxItems = items > maxItems ? items : maxItems
+      o.children = [];
+      for (var i = 0; i < items; i++) {
+        o.children.push({ seq: seq++ });
+      }
+      o.children.forEach(function(d, i) {
+        d.leaf = true;
+        d.id = o.id + "-" + i;
+        addChildren(d, l + 1);
+      });
+    }
+    addChildren(data, currDepth);
+
+    return { data: data, meta: { usedDepth: usedDepth, maxWidth: maxItems } }
+  }
+
+}
+
+// Generate initial viz
+go();
+
+</script>
