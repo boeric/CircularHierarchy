@@ -1,4 +1,4 @@
-# Circular Hierarchy
+# circular-hierarchy
 
 Creates a random hierarchy and displays it using a circular layout. The data generation and visualization are done from scratch (for example, d3-hierarchy is **not** used).
 
